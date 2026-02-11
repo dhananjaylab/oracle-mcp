@@ -1,168 +1,98 @@
-# -*- coding: utf-8 -*-
 import os
+import sys
 import oracledb
 import numpy as np
 import difflib
 from rapidfuzz import fuzz
 from dotenv import load_dotenv
-# NEW: Unified Google Gen AI SDK
 from google import genai
 from google.genai import types
 
 load_dotenv()
 
 class SearchSimilarProduct:
-    def __init__(
-            self,
-            top_k=5,
-            minimal_distance=1.0,
-            embedding_model="gemini-embedding-001", # Updated to the latest stable model
-            db_dsn=None,
-            username=None,
-            password=None
-    ):
-        # NEW: Google Gen AI Client Initialization
-        api_key = "AIzaSyAynyiGr2cRDsV4SAr9F-IILZnAit-4xSY"
+    def __init__(self, top_k=5, minimal_distance=1.0, embedding_model="gemini-embedding-001"):
+        api_key = os.getenv("GOOGLE_API_KEY")
         if not api_key:
-            raise ValueError("❌ GOOGLE_API_KEY environment variable is required")
+            raise ValueError("❌ GOOGLE_API_KEY is missing")
         
-        # Initialize the unified client
         self.client = genai.Client(api_key=api_key)
-
-        # Oracle Configuration
-        self.db_dsn = db_dsn or os.getenv("ORACLE_DSN", "localhost:1522/XEPDB1")
-        self.username = username or os.getenv("ORACLE_USER", "system")
-        self.password = password or os.getenv("ORACLE_PASSWORD", "oracle")
-
+        self.db_dsn = os.getenv("ORACLE_DSN", "localhost:1522/xepdb1")
+        self.username = os.getenv("ORACLE_USER", "system")
+        self.password = os.getenv("ORACLE_PASSWORD", "oracle")
         self.top_k = top_k
         self.minimal_distance = minimal_distance
         self.embedding_model = embedding_model
 
-        # Connect to Oracle using Thin Mode (Standard for 2.x+)
         try:
-            self.conn = oracledb.connect(
-                user=self.username,
-                password=self.password,
-                dsn=self.db_dsn
-            )
-            self.conn.execute("ALTER SESSION SET CURRENT_SCHEMA = BOOKSTORE")
-            print(f"✅ Connected and switched to BOOKSTORE schema")
+            self.conn = oracledb.connect(user=self.username, password=self.password, dsn=self.db_dsn)
+            with self.conn.cursor() as cursor:
+                cursor.execute("ALTER SESSION SET CURRENT_SCHEMA = BOOKSTORE")
+            # Redirecting to stderr ensures MCP JSON-RPC on stdout isn't corrupted
+            print(f"DEBUG: Connected to Oracle (BOOKSTORE)", file=sys.stderr)
         except Exception as e:
-            print(f"❌ Failed to connect to Oracle: {e}")
+            print(f"DEBUG: Oracle Error: {e}", file=sys.stderr)
             raise
 
-        print("📦 Loading Oracle Vectors...")
         self._load_embeddings()
 
     def _load_embeddings(self):
-        """Load pre-computed embeddings from Oracle database"""
         try:
             with self.conn.cursor() as cursor:
-                # Ensure the correct schema if needed
-                cursor.execute("ALTER SESSION SET CURRENT_SCHEMA = BOOKSTORE")
                 cursor.execute("SELECT id, code, description, vector FROM embeddings_products")
-                
                 self.vectors = []
                 self.products = []
-                
                 for row in cursor.fetchall():
-                    id_, code, description, blob = row
-                    if blob:
-                        # Convert BLOB to numpy array
-                        vector = np.frombuffer(blob.read(), dtype=np.float32)
+                    if row[3]:
+                        vector = np.frombuffer(row[3].read(), dtype=np.float32)
                         self.vectors.append(vector)
-                        self.products.append({
-                            "id": id_,
-                            "code": code,
-                            "description": description
-                        })
-                
+                        self.products.append({"id": row[0], "code": row[1], "description": row[2]})
                 self.vectors = np.array(self.vectors)
-                print(f"✅ Loaded {len(self.products)} products with vectors")
+                print(f"DEBUG: Loaded {len(self.products)} vectors", file=sys.stderr)
         except Exception as e:
-            print(f"❌ Error loading embeddings: {e}")
-            self.vectors = np.array([])
-            self.products = []
+            print(f"DEBUG: Load Error: {e}", file=sys.stderr)
 
     def _embed_text(self, text):
-        """Generate embedding using the new Gen AI SDK Client"""
         try:
-            # NEW: SDK call structure for embeddings
             response = self.client.models.embed_content(
                 model=self.embedding_model,
                 contents=text,
                 config=types.EmbedContentConfig(task_type="SEMANTIC_SIMILARITY")
             )
-            # The new SDK returns a list of embeddings; we take the first one
             return np.array(response.embeddings[0].values)
         except Exception as e:
-            print(f"❌ Error generating embedding: {e}")
+            print(f"DEBUG: Embedding Error: {e}", file=sys.stderr)
             return None
 
-    def _correct_input(self, input_user):
-        """Fuzzy correction for input search terms"""
-        if not self.products:
-            return input_user
-        descriptions = [p["description"] for p in self.products]
-        suggestions = difflib.get_close_matches(input_user, descriptions, n=1, cutoff=0.6)
-        return suggestions[0] if suggestions else input_user
-
     def search_similar_products(self, description_input):
-        """Perform semantic search with fuzzy fallback"""
         description_input = description_input.strip()
-        description_corrected = self._correct_input(description_input)
+        # Simple fuzzy correction
+        descriptions = [p["description"] for p in self.products]
+        matches = difflib.get_close_matches(description_input, descriptions, n=1, cutoff=0.6)
+        corrected = matches[0] if matches else description_input
 
-        results = {
-            "consult_original": description_input,
-            "consult_used": description_corrected,
-            "semantics": [],
-            "fallback_fuzzy": []
-        }
+        results = {"consult_original": description_input, "consult_used": corrected, "semantics": [], "fallback_fuzzy": []}
 
         if len(self.vectors) == 0:
-            results["fallback_fuzzy"] = self._fuzzy_fallback(description_corrected)
             return results
 
-        consult_emb = self._embed_text(description_corrected)
-        if consult_emb is None:
-            results["fallback_fuzzy"] = self._fuzzy_fallback(description_corrected)
-            return results
+        emb = self._embed_text(corrected)
+        if emb is None: return results
 
-        # Vector similarity (Euclidean)
-        dists = np.linalg.norm(self.vectors - consult_emb, axis=1)
+        dists = np.linalg.norm(self.vectors - emb, axis=1)
         top_indices = np.argsort(dists)[:self.top_k]
 
         for idx in top_indices:
             dist = dists[idx]
             if dist < self.minimal_distance:
                 match = self.products[idx]
-                similarity = 1 / (1 + dist)
                 results["semantics"].append({
-                    "id": match["id"],
-                    "code": match["code"],
-                    "description": match["description"],
-                    "similarity": round(similarity * 100, 2),
-                    "distance": round(dist, 4)
+                    "id": match["id"], "code": match["code"], "description": match["description"],
+                    "similarity": round((1/(1+dist)) * 100, 2)
                 })
-
-        if not results["semantics"]:
-            results["fallback_fuzzy"] = self._fuzzy_fallback(description_corrected)
-
         return results
-
-    def _fuzzy_fallback(self, description_corrected):
-        """RapidFuzz fallback for when vector search yields no close matches"""
-        better_fuzz = []
-        for product in self.products:
-            score = fuzz.token_sort_ratio(description_corrected, product["description"])
-            better_fuzz.append((product, score))
-        
-        better_fuzz.sort(key=lambda x: x[1], reverse=True)
-        return [
-            {
-                "id": p["id"], 
-                "code": p["code"], 
-                "description": p["description"], 
-                "score_fuzzy": round(s, 2)
-            } for p, s in better_fuzz[:self.top_k]
-        ]
+    
+    def close(self):
+        """Explicitly close the Oracle connection."""
+        if hasattr(self, 'conn') and self.conn:
+            self.conn.close()

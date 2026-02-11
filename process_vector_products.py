@@ -14,7 +14,7 @@ from google.genai import types
 load_dotenv()
 
 # === GOOGLE AI CONFIGURATION ===
-GOOGLE_API_KEY = ""
+GOOGLE_API_KEY = "AIzaSyAynyiGr2cRDsV4SAr9F-IILZnAit-4xSY"
 print(GOOGLE_API_KEY)
 
 if not GOOGLE_API_KEY:

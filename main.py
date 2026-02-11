@@ -12,7 +12,7 @@ from mcp.client.stdio import stdio_client
 load_dotenv()
 
 # Configuration
-GOOGLE_API_KEY = ""
+GOOGLE_API_KEY = "AIzaSyAynyiGr2cRDsV4SAr9F-IILZnAit-4xSY"
 if not GOOGLE_API_KEY:
     raise ValueError("❌ GOOGLE_API_KEY environment variable is required")
 
@@ -20,20 +20,21 @@ if not GOOGLE_API_KEY:
 client = genai.Client(api_key=GOOGLE_API_KEY)
 
 # System prompt for the agent
-SYSTEM_PROMPT = """You are an agent responsible for resolving inconsistencies in customer return invoices.
-Your goal is to find the company's original outbound invoice based on the information from the customer's return invoice.
+SYSTEM_PROMPT = """You are an Expert Invoice Reconciliation Agent. 
+Your task is to match customer returns to original outbound invoices.
 
-**Return Invoice Data (Mandatory Input)**
-- `customer`  
-- `description`  
-- `price`  
-- `location`  
+### Protocol:
+1. Identify the product using semantic search.
+2. Cross-reference the EAN with the Invoice database.
+3. Provide a 'Confidence Score' (0-100%):
+   - 100%: EAN, Price, and Customer match exactly.
+   - 80%: EAN and Customer match, but Price is slightly different (within margin).
+   - 50%: Product matches semantically but Customer name has slight variations.
 
-### Tasks
-1. Search for outbound invoices using `search_invoices_by_criteria`.
-2. Generate candidate EANs by combining results from `search_vectorized_product` and `resolve_ean`.
-3. Check if EANs match any invoices found.
-4. Display List "C" (Matched Invoices).
+### Output Format:
+| Invoice # | Product | Customer | Match Score | Reasoning |
+|-----------|---------|----------|-------------|-----------|
+| ...       | ...     | ...      | ...         | ...       |
 """
 
 # Tool definitions using the modern SDK style
@@ -121,7 +122,7 @@ async def run_agent_loop(mcp_session: ClientSession, query: str, memory_state: M
     """Modern ReAct Agent Loop"""
     memory_state.add_user_message(query)
     
-    print("\n🤖 Agent Processing...")
+    print("\n🤖 Agent Processing...", file=sys.stderr)
     
     while True:
         try:
@@ -136,7 +137,7 @@ async def run_agent_loop(mcp_session: ClientSession, query: str, memory_state: M
                 contents=memory_state.history
             )
         except Exception as e:
-            print(f"❌ Error calling Gemini: {e}")
+            print(f"❌ Error calling Gemini: {e}", file=sys.stderr)
             break
 
         if not response.candidates:
@@ -153,12 +154,12 @@ async def run_agent_loop(mcp_session: ClientSession, query: str, memory_state: M
             # Final text response
             for part in candidate.content.parts:
                 if part.text:
-                    print(f"\n✅ Assistant: {part.text}")
+                    print(f"\n✅ Assistant: {part.text}", file=sys.stderr)
             break
 
         # Process function calls
         for fc in function_calls:
-            print(f"🔧 Tool: {fc.name} | Args: {fc.args}")
+            print(f"🔧 Tool: {fc.name} | Args: {fc.args}", file=sys.stderr)
             
             # Execute via MCP
             result = await call_mcp_tool(mcp_session, fc.name, fc.args)
@@ -167,38 +168,62 @@ async def run_agent_loop(mcp_session: ClientSession, query: str, memory_state: M
             memory_state.add_tool_result(None, fc.name, result)
 
 async def main():
-    print("🚀 Connecting to MCP server...")
+    print("🚀 Starting MCP Client...", file=sys.stderr)
     
+    server_script = Path(__file__).parent / "server_invoice_items.py"
+
+    # Use -u for unbuffered output to ensure JSON-RPC is clean
     server_params = StdioServerParameters(
-        command="python",
-        args=["server_invoice_items.py"]
+        command=sys.executable,
+        args=["-u", str(server_script)],
+        env=os.environ.copy()
     )
     
     try:
-        async with stdio_client(server_params) as mcp_transport:
-            mcp_session, _ = mcp_transport
-            await mcp_session.initialize()
-            print("✅ MCP Server connected")
+        # 1. Establish the Transport (Pipes)
+        async with stdio_client(server_params) as (read_stream, write_stream):
             
-            memory_state = MemoryState()
-            
-            print("\n" + "="*60)
-            print("🎯 Invoice Resolution Agent (v2.0)")
-            print("="*60)
-            
-            while True:
-                try:
-                    query = input("You: ").strip()
-                    if query.lower() in ["quit", "exit"]: break
-                    if not query: continue
-                    
-                    await run_agent_loop(mcp_session, query, memory_state)
-                    
-                except KeyboardInterrupt: break
-                except Exception as e:
-                    print(f"❌ Error: {e}")
+            # 2. Create the Session using the pipes
+            async with ClientSession(read_stream, write_stream) as session:
+                
+                # 3. Initialize the Session (The Handshake)
+                await session.initialize()
+                print("✅ MCP Session Initialized", file=sys.stderr)
+                
+                memory_state = MemoryState()
+                
+                print("\n" + "="*60)
+                print("🎯 Invoice Resolution Agent (v2.0)")
+                print("="*60)
+                print("Type 'exit' to quit. Use Ctrl+C to force stop.\n")
+                
+                # Inside main.py
+                while True:
+                    try:
+                        # Prompt user
+                        query = input("\nYou (type 'exit' to quit): ").strip()
+                        
+                        if query.lower() in ["quit", "exit", "bye"]:
+                            print("\n👋 Shutting down agent and closing MCP session...", file=sys.stderr)
+                            break # Breaks out of 'while True', triggering the 'async with' exit
+                            
+                        if not query: continue
+                        
+                        await run_agent_loop(session, query, memory_state)
+                        
+                    except KeyboardInterrupt:
+                        print("\n\n⚠️  Interrupt detected. Cleaning up resources...", file=sys.stderr)
+                        break # Exit smoothly on Ctrl+C
+                    except Exception as e:
+                        print(f"\n❌ Runtime Error: {e}", file=sys.stderr)
+
+                print("✅ Shutdown complete. Goodbye.", file=sys.stderr)
+
     except Exception as e:
-        print(f"❌ Connection failed: {e}")
+        print(f"\n❌ Connection failed: {e}", file=sys.stderr)
+        # If the server is spitting out errors, this will catch them
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
     asyncio.run(main())
