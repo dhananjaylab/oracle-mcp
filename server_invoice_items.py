@@ -4,15 +4,14 @@ import sys
 import oracledb
 from mcp.server.fastmcp import FastMCP
 from product_search import SearchSimilarProduct
-from dotenv import load_dotenv
+from decouple import config
 from contextlib import contextmanager
 
-load_dotenv()
 
 # === DB CONFIGURATION ===
-DB_DSN = os.getenv("ORACLE_DSN", "localhost:1522/xepdb1")
-USERNAME = os.getenv("ORACLE_USER", "system")
-PASSWORD = os.getenv("ORACLE_PASSWORD", "oracle")
+DB_DSN = config('ORACLE_DSN')
+USERNAME = config('ORACLE_USER')
+PASSWORD = config('ORACLE_PASSWORD')
 
 @contextmanager
 def get_db_connection():

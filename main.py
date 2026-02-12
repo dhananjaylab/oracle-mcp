@@ -3,21 +3,21 @@ import json
 import os
 import sys
 from pathlib import Path
-from dotenv import load_dotenv
 from google import genai
+from decouple import config
 from google.genai import types
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-load_dotenv()
 
 # Configuration
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
-if not GOOGLE_API_KEY:
-    raise ValueError("❌ GOOGLE_API_KEY environment variable is required")
+GEMINI_API_KEY = config("GEMINI_API_KEY")
+print(f"🔑 GEMINI_API_KEY: {GEMINI_API_KEY}", file=sys.stderr)
+if not GEMINI_API_KEY:
+    raise ValueError("❌ GEMINI_API_KEY environment variable is required")
 
 # Initialize the Modern Client
-client = genai.Client(api_key=GOOGLE_API_KEY)
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 # System prompt for the agent
 SYSTEM_PROMPT = """You are an Expert Invoice Reconciliation Agent. 

@@ -5,29 +5,28 @@ Updated for google-genai SDK and Oracle 21c XE.
 
 import os
 import sys
-from dotenv import load_dotenv
+from decouple import config
 import oracledb
 import numpy as np
 from google import genai
 from google.genai import types
 
-load_dotenv()
 
 # === GOOGLE AI CONFIGURATION ===
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
-print(GOOGLE_API_KEY)
+GEMINI_API_KEY = config("GEMINI_API_KEY")
+print(GEMINI_API_KEY)
 
-if not GOOGLE_API_KEY:
-    print("❌ ERROR: GOOGLE_API_KEY environment variable is required")
+if not GEMINI_API_KEY:
+    print("❌ ERROR: GEMINI_API_KEY environment variable is required")
     sys.exit(1)
 
 # Initialize the modern Gemini Client
-client = genai.Client(api_key=GOOGLE_API_KEY)
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 # === ORACLE CONFIGURATION ===
-DB_DSN = os.getenv("ORACLE_DSN", "localhost:1522/xepdb1")
-USERNAME = os.getenv("ORACLE_USER", "system")
-PASSWORD = os.getenv("ORACLE_PASSWORD", "oracle")
+DB_DSN = config('ORACLE_DSN')
+USERNAME = config('ORACLE_USER')
+PASSWORD = config('ORACLE_PASSWORD')
 EMBEDDING_MODEL = "gemini-embedding-001" # Using the latest, more accurate model
 
 print("="*60)

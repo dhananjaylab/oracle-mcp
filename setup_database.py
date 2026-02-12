@@ -10,16 +10,15 @@ import os
 import sys
 import re
 from pathlib import Path
-from dotenv import load_dotenv
+from decouple import config
 import oracledb
 
 # Load environment variables
-load_dotenv()
 
 # Configuration
-DB_DSN = os.getenv("ORACLE_DSN", "localhost:1521/xe")
-USERNAME = os.getenv("ORACLE_USER", "admin")
-PASSWORD = os.getenv("ORACLE_PASSWORD", "")
+DB_DSN = config('ORACLE_DSN')
+USERNAME = config('ORACLE_USER')
+PASSWORD = config('ORACLE_PASSWORD')
 
 # SQL files in current directory
 SCRIPT_DIR = Path(__file__).parent
@@ -560,7 +559,7 @@ def main():
     if not os.path.exists(".env"):
         print("❌ .env file not found!")
         print("\nCreate a .env file with:")
-        print("  GOOGLE_API_KEY=your_key_here")
+        print("  GEMINI_API_KEY=your_key_here")
         print("  ORACLE_DSN=localhost:1521/xe")
         print("  ORACLE_USER=admin")
         print("  ORACLE_PASSWORD=your_password")

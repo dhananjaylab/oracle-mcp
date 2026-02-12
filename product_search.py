@@ -4,22 +4,20 @@ import oracledb
 import numpy as np
 import difflib
 from rapidfuzz import fuzz
-from dotenv import load_dotenv
+from decouple import config
 from google import genai
 from google.genai import types
 
-load_dotenv()
-
 class SearchSimilarProduct:
     def __init__(self, top_k=5, minimal_distance=1.0, embedding_model="gemini-embedding-001"):
-        api_key = os.getenv("GOOGLE_API_KEY")
+        api_key = config("GEMINI_API_KEY")
         if not api_key:
-            raise ValueError("❌ GOOGLE_API_KEY is missing")
+            raise ValueError("❌ GEMINI_API_KEY is missing")
         
         self.client = genai.Client(api_key=api_key)
-        self.db_dsn = os.getenv("ORACLE_DSN", "localhost:1522/xepdb1")
-        self.username = os.getenv("ORACLE_USER", "system")
-        self.password = os.getenv("ORACLE_PASSWORD", "oracle")
+        self.db_dsn = config("ORACLE_DSN")
+        self.username = config("ORACLE_USER")
+        self.password = config("ORACLE_PASSWORD")
         self.top_k = top_k
         self.minimal_distance = minimal_distance
         self.embedding_model = embedding_model
