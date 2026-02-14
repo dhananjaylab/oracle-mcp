@@ -12,7 +12,6 @@ from mcp.client.stdio import stdio_client
 
 # Configuration
 GEMINI_API_KEY = config("GEMINI_API_KEY")
-print(f"🔑 GEMINI_API_KEY: {GEMINI_API_KEY}", file=sys.stderr)
 if not GEMINI_API_KEY:
     raise ValueError("❌ GEMINI_API_KEY environment variable is required")
 
